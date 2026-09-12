@@ -97,6 +97,24 @@ hardware. The provisioning script is the supported path for fleet deployment.
 - **Cursor:** `unclutter-xfixes` hides the mouse pointer after 1 second of
   inactivity and brings it back instantly on movement — invisible during normal
   display, usable the moment someone needs to click Save.
+- **Changing the Wi-Fi network:** from the same settings page (Ctrl+Alt+S → Settings),
+  click "Change Wi-Fi Network" to reach `/wifi`, which scans and lists nearby networks
+  by signal strength. Pick one — a password field only appears if it's secured — or use
+  the "connect to a different or hidden network" form for anything not in the scan
+  list. The current SSID is always shown for context. On success, the display
+  auto-returns to the site after a few seconds (or immediately via a "Continue Now"
+  button); on failure, it shows nmcli's own error text and offers "Try Again" without
+  navigating anywhere — never a dead end, never a silent failure. `server.py` still
+  runs unprivileged as `arduino`; the actual `nmcli` connect call is delegated to a
+  narrowly-scoped root-owned helper, `/usr/local/sbin/kiosk-wifi-connect.sh`, invoked
+  via a single-command `NOPASSWD` sudoers rule (`/etc/sudoers.d/kiosk-wifi`). The
+  helper lives outside `/home/arduino` specifically so the unprivileged `arduino` user
+  can't overwrite it and turn that grant into arbitrary root access — confirmed on
+  hardware: `arduino` gets "Permission denied" trying to touch, edit, or delete it.
+  Scanning itself needs no elevated privilege. (Live-tested end-to-end: real scan
+  results, a safe failure case via a nonexistent SSID showing a clean error message
+  with the current connection left untouched, and the return-to-site route correctly
+  flipping back to the site and relaunching Chromium.)
 - **Power-cut resilience:** the root filesystem (`/`) is mounted through `overlayroot`
   as a RAM-backed (`tmpfs`) overlay — nothing on it can be corrupted by a hard power
   cut, because no write to `/` ever touches the real disk after boot. The one thing
@@ -143,6 +161,22 @@ Always reboot and re-verify after a change like this — it's easy to think an e
 worked because the *live* (overlaid) view shows it, when it actually only exists in
 RAM and will be gone on the next boot.
 
+**One exception worth knowing:** a *brand-new* path that doesn't already exist
+anywhere under `/` becomes visible in the live overlay immediately after you write it
+to `/media/root-ro`, with no reboot required — overlayfs falls through to the lower
+(real-disk) layer for anything not already shadowed in the RAM upper layer. This is
+how `/usr/local/sbin/kiosk-wifi-connect.sh` and `/etc/sudoers.d/kiosk-wifi` were added
+and verified on the live board without a reboot. It only works for genuinely new
+paths, though — overwriting or removing something that already exists still needs the
+reboot to confirm the change actually stuck (the live view would otherwise be showing
+whatever's in the RAM layer, if anything had already touched that path this boot).
+
+Both `/usr/local/sbin/kiosk-wifi-connect.sh` and `/etc/sudoers.d/kiosk-wifi` are, like
+`/etc/lightdm/...` and the systemd unit, under the overlaid `/` — patching either on an
+already-provisioned board needs this same procedure, not a plain edit. (`sudoers.d`
+edits specifically should always be validated with `sudo visudo -c -f <tmpfile>`
+before installing — a malformed sudoers file can break `sudo` system-wide.)
+
 ## Known limitations / open items
 
 - **Login-required target pages:** Chromium runs with `--incognito` (chosen so a
@@ -165,6 +199,16 @@ RAM and will be gone on the next boot.
   managing these boards remotely across VLANs, be aware that inter-VLAN routing
   quality varies by network — this isn't a board issue, just worth testing your own
   network path before assuming remote SSH access will be reliable.
+- **Wi-Fi settings page — still open after live testing:** scanning, the
+  network-not-found failure case, and the return-to-site route were all verified
+  working on real hardware. Still untested: (a) actually clicking the "Change Wi-Fi
+  Network" link *from inside the kiosk's own Chromium `--app` window* (verified so far
+  only via direct HTTP requests to the server, not through the real kiosk UI) — expected
+  to work since `--app` mode allows normal in-page navigation, but not yet confirmed;
+  (b) the wrong-password-on-a-real-network case (only tested against a nonexistent
+  SSID, to avoid touching anyone's actual Wi-Fi credentials/connection during
+  development); (c) whether nmcli ever echoes a plaintext password back in its own
+  error output (the failure page would display it verbatim if so).
 
 ## File layout
 
@@ -175,6 +219,7 @@ README.md                       # this file
 # Deployed onto the board by provision-kiosk.sh, for reference:
 /home/arduino/kiosk/
   server.py                     # local settings HTTP server (127.0.0.1:8080 only)
+                                 # serves /settings, /wifi, /wifi/connect, /wifi/return-to-site
   kiosk-chromium.sh             # restart-loop wrapper that launches Chromium
   toggle-settings.sh            # bound to Ctrl+Alt+S, flips to settings mode
   config.json                   # {"url": "..."} — the client's current target
@@ -187,4 +232,6 @@ README.md                       # this file
 /etc/lightdm/lightdm.conf.d/50-autologin.conf
 /etc/systemd/system/kiosk-server.service
 /etc/overlayroot.conf           # overlayroot="tmpfs:recurse=0"
+/usr/local/sbin/kiosk-wifi-connect.sh   # root-owned; only callable via sudoers rule below
+/etc/sudoers.d/kiosk-wifi                # NOPASSWD rule scoped to the script above
 ```
