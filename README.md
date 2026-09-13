@@ -97,6 +97,14 @@ hardware. The provisioning script is the supported path for fleet deployment.
 - **Cursor:** `unclutter-xfixes` hides the mouse pointer after 1 second of
   inactivity and brings it back instantly on movement — invisible during normal
   display, usable the moment someone needs to click Save.
+- **Arduino App Lab's own autostart is disabled.** The stock image ships a
+  system-wide `/etc/xdg/autostart/ArduinoAppLab.desktop` that launches the App Lab
+  desktop app (with a "Welcome to Arduino App Lab" dialog) on every XFCE login —
+  discovered when it popped up on top of the kiosk after a routine reboot. Fixed with
+  a standard XDG per-user override: `~/.config/autostart/ArduinoAppLab.desktop`
+  containing just `Hidden=true`. This is a normal write under `/home/arduino`, so it
+  needs no `/etc` edit and no overlayroot workaround even on an already-provisioned
+  board.
 - **Changing the Wi-Fi network:** from the same settings page (Ctrl+Alt+S → Settings),
   click "Change Wi-Fi Network" to reach `/wifi`, which scans and lists nearby networks
   by signal strength. Pick one — a password field only appears if it's secured — or use
@@ -227,6 +235,8 @@ README.md                       # this file
 /home/arduino/.config/autostart/
   kiosk-chromium.desktop
   unclutter.desktop
+  ArduinoAppLab.desktop         # Hidden=true -- overrides/disables the stock
+                                 # system-wide App Lab autostart entry
 /home/arduino/.config/xfce4/xfconf/xfce-perchannel-xml/
   xfce4-keyboard-shortcuts.xml  # Ctrl+Alt+S -> toggle-settings.sh
 /etc/lightdm/lightdm.conf.d/50-autologin.conf

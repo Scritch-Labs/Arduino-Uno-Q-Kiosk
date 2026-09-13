@@ -449,6 +449,15 @@ X-GNOME-Autostart-enabled=true
 NoDisplay=true
 UNCLUTTEREOF
 
+echo "==> Disabling Arduino App Lab's own autostart (it ships a system-wide"
+echo "    /etc/xdg/autostart entry that otherwise pops up on top of the kiosk"
+echo "    on every login). Standard XDG override -- no /etc edit needed, so"
+echo "    no overlayroot workaround is needed even on an already-provisioned board."
+cat <<'APPLABEOF' > /home/arduino/.config/autostart/ArduinoAppLab.desktop
+[Desktop Entry]
+Hidden=true
+APPLABEOF
+
 echo "==> Ctrl+Alt+S settings hotkey (written directly to xfconf's XML store,"
 echo "    so it applies on first XFCE login without needing a live session)"
 XFCONF_FILE=/home/arduino/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml
