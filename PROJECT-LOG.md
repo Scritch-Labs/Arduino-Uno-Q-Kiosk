@@ -71,6 +71,58 @@ actual reason for choosing this board originally.
    subagent before implementing. All SSID/user-supplied values are `html.escape()`'d
    (SSIDs are attacker-controllable, broadcast by anything in radio range).
 
+5a. **Bug (2026-09-14): Wi-Fi changes didn't survive a reboot — another instance of
+    the "overlayroot gotcha" (#3), missed when #5 was built.** `nmcli` connects fine
+    immediately, but NetworkManager saves the new connection profile under
+    `/etc/NetworkManager/system-connections`, which is on the tmpfs root overlay —
+    gone on the next reboot/power cut, unlike the URL setting which was already on
+    persistent `/home/arduino`. **Fix:** `kiosk-wifi-connect.sh` now also copies the
+    resulting `.nmconnection` file to persistent `/home/arduino/kiosk/wifi-connections/`
+    after a successful connect; a new `kiosk-wifi-restore.service`
+    (`Before=NetworkManager.service`) copies it back into
+    `/etc/NetworkManager/system-connections` on every boot before NetworkManager
+    starts. Applied to `provision-kiosk.sh` and hand-patched onto the already-running
+    board via the `/media/root-ro` remount procedure (see README's "Maintaining an
+    already-provisioned board").
+    **The gotcha bit the fix itself, too:** the first hand-patch attempt wrote the new
+    helper/systemd-unit files straight to the live (already-overlaid) board over SSH —
+    exactly the mistake bullet #3 warns about — and a verification reboot silently
+    reverted all of it. Caught by re-checking file contents after that reboot, then
+    redone correctly through `/media/root-ro`. Lesson re-confirmed: always reboot and
+    diff the *actual* file contents to verify a persistence fix, never trust the live
+    view.
+
+5b. **Bug (2026-09-15): Wi-Fi password connect failed with
+    `802-11-wireless-security.key-mgmt: property is missing`.** Turned out to be two
+    separate bugs found in sequence. First layer: the "connect to a different or
+    hidden network" form used an HTML `<input type="hidden">` *field* (always
+    submitted) to mean a Wi-Fi network that doesn't broadcast its SSID — so every
+    manually-typed network, hidden or not, was sent to the backend as
+    `hidden_network=1`, and `nmcli device wifi connect SSID password PASS hidden yes`
+    has a genuine upstream bug where the auto-generated profile for a hidden network
+    omits `key-mgmt`. Fixed the form field to a real, unchecked-by-default checkbox
+    and had `kiosk-wifi-connect.sh` build hidden-network profiles explicitly via
+    `nmcli connection add` instead. **Verified live, reported fixed — then the exact
+    same error recurred reconnecting to an already-known, non-hidden network.**
+    Second layer, a *different* nmcli bug in the same family:
+    `nmcli device wifi connect` also uses this wrapper to *update* an
+    **already-saved** connection's password, and that update path can independently
+    drop `key-mgmt` too — confirmed via NetworkManager's own audit log:
+    `op="connection-update" ... reason="802-11-wireless-security.key-mgmt: property
+    is missing"`. So the hidden-network fix alone wasn't the whole story: reconnecting
+    to *any* previously-saved secured network with a password could still hit this.
+    **Fix:** stopped using nmcli's `device wifi connect ... password` wrapper for any
+    passworded connection, hidden or not, new or pre-existing — `kiosk-wifi-connect.sh`
+    now always explicitly `connection add`s (new SSID) or `connection modify`s
+    (already-saved SSID), setting `key-mgmt wpa-psk` and `psk` itself either way,
+    before `connection up`. Open networks still use the plain wrapper (no
+    `wireless-security` section to corrupt). Reproduced both bugs on hardware before
+    fixing, and re-verified by replaying the user's exact failing scenario
+    (reconnecting a previously saved home network with its real password) through the fixed script.
+    **Lesson:** a fix that's "verified" against the specific repro case you built
+    doesn't mean the same error can't have another cause — don't declare a bug class
+    closed until the user's own retest passes too.
+
 6. **Fleet deployment — why not just clone the eMMC:** investigated and ruled out.
    Arduino's own `arduino-flasher-cli` only flashes their stock factory image (no
    "capture current board state" mode); raw `dd` whole-disk clones between two Uno Q
