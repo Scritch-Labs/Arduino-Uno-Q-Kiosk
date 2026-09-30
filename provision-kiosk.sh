@@ -191,6 +191,8 @@ WIFI_PAGE = """<!doctype html>
   .notice {{ background:#3a2a10; padding:0.75rem; border-radius:6px; margin-bottom:1rem; }}
   a {{ color:#8ab4f8; }}
   .links {{ margin-top:1.5rem; }}
+  .checkbox {{ display:block; margin-top:0.75rem; font-size:0.9rem; opacity:0.85; }}
+  .checkbox input {{ width:auto; margin:0 0.4rem 0 0; vertical-align:middle; }}
 </style></head>
 <body>
   <div class="card">
@@ -204,7 +206,8 @@ WIFI_PAGE = """<!doctype html>
       <label>Connect to a different or hidden network</label>
       <input name="ssid" type="text" placeholder="Network name" required>
       <input name="password" type="password" placeholder="Password (leave blank if none)">
-      <input type="hidden" name="hidden_network" value="1">
+      <label class="checkbox"><input type="checkbox" name="hidden_network" value="1">
+        This network is hidden (doesn&rsquo;t broadcast its name)</label>
       <button class="submit" type="submit">Connect</button>
     </form>
     <div class="links">
@@ -518,24 +521,121 @@ cat <<'WIFIEOF' | sudo tee /usr/local/sbin/kiosk-wifi-connect.sh > /dev/null
 # has no stdin-based secret input, so the plaintext password IS briefly visible in
 # THAT process's argv (e.g. to `ps`) for the life of the nmcli call. Accepted here
 # since no other local accounts exist on these boards.
-set -euo pipefail
+set -uo pipefail
+
+PERSIST_DIR=/home/arduino/kiosk/wifi-connections
 
 payload=$(cat)
 ssid=$(printf '%s' "$payload" | python3 -c 'import json,sys;print(json.load(sys.stdin)["ssid"])')
 password=$(printf '%s' "$payload" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("password",""))')
 hidden=$(printf '%s' "$payload" | python3 -c 'import json,sys;print("yes" if json.load(sys.stdin).get("hidden") else "")')
 
-args=(device wifi connect "$ssid")
-[ -n "$password" ] && args+=(password "$password")
-[ -n "$hidden" ] && args+=(hidden yes)
-
 # Wrong-password attempts don't fail instantly -- NetworkManager retries the
 # handshake for tens of seconds. Bound it so this can't hang the caller forever.
 # Exit code 124 (from `timeout`) means "gave up", distinct from nmcli's own failures.
-exec timeout 45 nmcli "${args[@]}"
+if [ -n "$password" ]; then
+    # nmcli's own "device wifi connect ... password X" convenience wrapper has
+    # multiple known bugs around 802-11-wireless-security.key-mgmt going missing:
+    # one when it auto-generates a fresh profile for a HIDDEN network, another when
+    # it UPDATES an EXISTING saved profile's password (reproduced live against a
+    # real, already-known, non-hidden network -- NetworkManager's own audit log
+    # showed op="connection-update" ... reason="802-11-wireless-security.key-mgmt:
+    # property is missing"). Sidestep both by managing the profile ourselves instead
+    # of trusting nmcli's create-or-update heuristic: explicitly (re)set key-mgmt
+    # and psk before ever bringing the connection up, whether new or pre-existing.
+    wifi_dev=$(nmcli -t -f DEVICE,TYPE device | awk -F: '$2=="wifi"{print $1; exit}')
+    was_new=0
+    if nmcli -t -f NAME connection show | grep -qFx "$ssid"; then
+        nmcli connection modify "$ssid" \
+            802-11-wireless.hidden "${hidden:-no}" \
+            802-11-wireless-security.key-mgmt wpa-psk \
+            802-11-wireless-security.psk "$password"
+        add_rc=$?
+    else
+        was_new=1
+        nmcli connection add type wifi con-name "$ssid" ifname "$wifi_dev" ssid "$ssid" \
+            802-11-wireless.hidden "${hidden:-no}" \
+            802-11-wireless-security.key-mgmt wpa-psk \
+            802-11-wireless-security.psk "$password"
+        add_rc=$?
+    fi
+    if [ "$add_rc" -eq 0 ]; then
+        timeout 45 nmcli connection up "$ssid"
+        rc=$?
+        [ "$rc" -eq 0 ] || [ "$was_new" -eq 0 ] || nmcli connection delete "$ssid" >/dev/null 2>&1
+    else
+        rc=$add_rc
+    fi
+else
+    # Open network, no wireless-security section involved -- nmcli's own
+    # convenience wrapper has no known bug in this case.
+    args=(device wifi connect "$ssid")
+    [ -n "$hidden" ] && args+=(hidden yes)
+    timeout 45 nmcli "${args[@]}"
+    rc=$?
+fi
+
+# NetworkManager saves the new connection profile under /etc/NetworkManager,
+# which lives on the tmpfs root overlay (see overlayroot below) -- it would
+# otherwise vanish on the very next reboot/power cut, silently undoing what
+# the front end just "saved". Copy it onto the real, persistent /home/arduino
+# disk so kiosk-wifi-restore.sh can put it back before NetworkManager starts.
+if [ "$rc" -eq 0 ]; then
+    conn_file=$(nmcli -t -f TYPE,FILENAME connection show --active \
+        | awk -F: '$1=="802-11-wireless"{print substr($0, length($1)+2); exit}')
+    if [ -n "$conn_file" ] && [ -f "$conn_file" ]; then
+        mkdir -p "$PERSIST_DIR"
+        chmod 700 "$PERSIST_DIR"
+        cp -p "$conn_file" "$PERSIST_DIR/$(basename "$conn_file")"
+        chmod 600 "$PERSIST_DIR/$(basename "$conn_file")"
+    fi
+fi
+exit "$rc"
 WIFIEOF
 sudo chown root:root /usr/local/sbin/kiosk-wifi-connect.sh
 sudo chmod 700 /usr/local/sbin/kiosk-wifi-connect.sh
+
+echo "==> Wi-Fi connection restore helper + boot-time systemd unit"
+echo "    Copies persisted connection profiles from /home/arduino back into"
+echo "    /etc/NetworkManager/system-connections before NetworkManager starts,"
+echo "    since the tmpfs root overlay wipes that directory on every reboot."
+cat <<'RESTOREEOF' | sudo tee /usr/local/sbin/kiosk-wifi-restore.sh > /dev/null
+#!/bin/bash
+# Run as root by kiosk-wifi-restore.service, before NetworkManager.service starts.
+set -uo pipefail
+
+SRC=/home/arduino/kiosk/wifi-connections
+DST=/etc/NetworkManager/system-connections
+
+[ -d "$SRC" ] || exit 0
+mkdir -p "$DST"
+
+shopt -s nullglob
+for f in "$SRC"/*.nmconnection; do
+    cp -p "$f" "$DST/"
+    chown root:root "$DST/$(basename "$f")"
+    chmod 600 "$DST/$(basename "$f")"
+done
+RESTOREEOF
+sudo chown root:root /usr/local/sbin/kiosk-wifi-restore.sh
+sudo chmod 700 /usr/local/sbin/kiosk-wifi-restore.sh
+
+cat <<SERVICE | sudo tee /etc/systemd/system/kiosk-wifi-restore.service > /dev/null
+[Unit]
+Description=Restore persisted Wi-Fi connection profiles before NetworkManager starts
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kiosk-wifi-restore.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=NetworkManager.service
+SERVICE
+
+sudo systemctl daemon-reload
+sudo systemctl enable kiosk-wifi-restore.service
 
 echo "==> Scoped sudoers rule for the Wi-Fi connect helper"
 TMP_SUDOERS=$(mktemp)
