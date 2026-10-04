@@ -461,6 +461,13 @@ cat <<'APPLABEOF' > /home/arduino/.config/autostart/ArduinoAppLab.desktop
 Hidden=true
 APPLABEOF
 
+echo "==> Disabling light-locker autostart (stock-image screen locker; if it"
+echo "    ever engaged it would park an unattended kiosk on a password prompt)"
+cat <<'LOCKEREOF' > /home/arduino/.config/autostart/light-locker.desktop
+[Desktop Entry]
+Hidden=true
+LOCKEREOF
+
 echo "==> Ctrl+Alt+S settings hotkey (written directly to xfconf's XML store,"
 echo "    so it applies on first XFCE login without needing a live session)"
 XFCONF_FILE=/home/arduino/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml

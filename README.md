@@ -159,6 +159,10 @@ cat ~/kiosk/config.json                    # {"url": "..."}
    boots straight into the kiosk.
 5. If the site uses a different Wi-Fi network than the one set up in Step 1, change it
    on the spot with [Change the Wi-Fi network](#change-the-wi-fi-network) below.
+6. **If the display is a TV rather than a monitor**, turn off its own "Auto Power Off",
+   "Eco" or "Sleep timer" setting in the TV's menu. Many TVs switch themselves off
+   after about 4 hours without a remote button press, even while showing a picture.
+   The kiosk keeps its signal on at all times, but it can't override the TV's settings.
 
 It's fine for the client to turn the kiosk off at the breaker or pull the plug. It's
 designed for that (see [Power-cut resilience](#power-cut-resilience)).
@@ -280,7 +284,7 @@ sequenceDiagram
     S->>S: kiosk-server.service starts (127.0.0.1:8080)
     S->>L: display manager
     L->>X: autologin as arduino (no prompt)
-    X->>X: autostart: unclutter, hotkey binding,<br/>App Lab suppressed (Hidden=true)
+    X->>X: autostart: unclutter, hotkey binding,<br/>App Lab + light-locker suppressed (Hidden=true)
     X->>C: autostart: kiosk-chromium.sh
     C->>C: mode = site → open config.json URL
 ```
@@ -294,7 +298,9 @@ sequenceDiagram
 
 When Chromium exits for any reason, the loop waits a second and launches it again.
 Before launching, it also turns off screen blanking and DPMS, so the monitor never goes
-to sleep.
+to sleep. Nothing else can turn them back on: XFCE's power manager isn't installed,
+the stock screen locker is disabled (see below), and systemd is left at its default of
+never suspending when idle.
 
 ```mermaid
 sequenceDiagram
@@ -468,6 +474,12 @@ a per-user override (`~/.config/autostart/ArduinoAppLab.desktop` with `Hidden=tr
 so it never starts. This is an ordinary file in `/home/arduino`, so it doesn't need
 any changes under `/etc`.
 
+**Why hide light-locker?** The stock image also starts `light-locker`, a screen locker,
+on every login. With the screensaver off it never fires, but if it ever did lock, an
+unattended kiosk would sit on a password prompt until someone visited. The script hides
+it with the same kind of override (`~/.config/autostart/light-locker.desktop` with
+`Hidden=true`).
+
 ## Maintaining an already-provisioned board
 
 > [!WARNING]
@@ -560,6 +572,7 @@ What the script installs on the board:
   kiosk-chromium.desktop
   unclutter.desktop
   ArduinoAppLab.desktop                       # Hidden=true (suppresses stock App Lab)
+  light-locker.desktop                        # Hidden=true (suppresses stock screen locker)
 /home/arduino/.config/xfce4/xfconf/xfce-perchannel-xml/
   xfce4-keyboard-shortcuts.xml                # Ctrl+Alt+S binding
 

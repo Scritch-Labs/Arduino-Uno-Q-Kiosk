@@ -141,6 +141,17 @@ actual reason for choosing this board originally.
    needed. Added to the provisioning script so every future board gets this
    automatically.
 
+8. **Screen must stay on indefinitely (audited 2026-10-04):** confirmed on the
+   board that the X screensaver timeout is 0 and DPMS is disabled (set by
+   `kiosk-chromium.sh`), xfce4-power-manager isn't installed, and logind has no
+   idle action. Found the stock `light-locker` running from
+   `/etc/xdg/autostart/` — dormant while the screensaver is off, but a lock would
+   strand the kiosk on a password prompt. Disabled with the same per-user
+   `Hidden=true` override (`~/.config/autostart/light-locker.desktop`), applied
+   to the live board and added to the provisioning script. Separately, TVs (not
+   monitors) often have their own "Auto Power Off" after ~4 hours without a
+   remote press; that must be turned off in the TV's own menu.
+
 ## Known limitations / deliberately deferred
 
 - **Login-required target pages:** Chromium runs `--incognito` (avoids "restore
@@ -179,8 +190,12 @@ actual reason for choosing this board originally.
 - `c87441d` — initial commit: `provision-kiosk.sh` + `README.md`.
 - `84d6fc4` — Wi-Fi network changing feature.
 - `5ab18fa` — App Lab autostart fix.
+- `6204717` — Wi-Fi changes persist across reboots; passworded-connect fix.
+- `b968f37` — README rewritten as installation guide + architecture reference.
+- Light-locker disabled and stay-awake audit documented (2026-10-04).
 
-Not pushed to any remote as of this writing.
+Pushed to `ssh://git@git.derek-crew.com:2222/Scritch-Labs/Arduino-Uno-Q-Terminal-Monitor.git`
+(branch `master`).
 
 ## If you're picking this back up
 
