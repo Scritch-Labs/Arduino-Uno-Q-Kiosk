@@ -3,15 +3,13 @@
 #
 # Prerequisites (must be done once per board, manually, via Arduino App Lab):
 #   1. Flash the board with the stock Arduino Linux image.
-#   2. Run through App Lab's first-boot wizard: join Wi-Fi, set a password,
-#      let it enable SSH + Network Mode.
-#   3. Confirm you can `ssh arduino@<board>` from this machine.
+#   2. Run through App Lab's first-boot wizard: join Wi-Fi, set a password.
 #
-# Usage (run ON the board itself, over SSH, as the `arduino` user):
-#   scp provision-kiosk.sh arduino@<board-ip-or-hostname>:~/
-#   ssh arduino@<board-ip-or-hostname>
-#   chmod +x provision-kiosk.sh
-#   ./provision-kiosk.sh "https://example.com/your-dashboard"
+# Usage (run ON the board itself, as the `arduino` user -- e.g. from App Lab's
+# built-in terminal, the >_ icon bottom-left; SSH or the board's own desktop
+# terminal work too):
+#   curl -fsSL https://raw.githubusercontent.com/Scritch-Labs/Arduino-Uno-Q-Kiosk/master/provision-kiosk.sh -o kiosk.sh
+#   bash kiosk.sh "https://example.com/your-dashboard"
 #
 # The script ends by rebooting the board. Everything (kiosk display,
 # Ctrl+Alt+S settings hotkey, autologin, power-cut-resilient read-only

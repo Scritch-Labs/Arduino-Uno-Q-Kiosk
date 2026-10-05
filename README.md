@@ -19,7 +19,6 @@ and an **Anker 543 USB-C hub**, provisioned by a single script.
   - [What you need](#what-you-need)
   - [Step 1: Prepare the board with Arduino App Lab](#step-1-prepare-the-board-with-arduino-app-lab)
   - [Step 2: Run the provisioning script](#step-2-run-the-provisioning-script)
-  - [Alternative: install at the board, without SSH](#alternative-install-at-the-board-without-ssh)
   - [Step 3: Verify the kiosk](#step-3-verify-the-kiosk)
   - [Step 4: Install on site](#step-4-install-on-site)
   - [Using the kiosk (client guide)](#using-the-kiosk-client-guide)
@@ -48,7 +47,7 @@ and an **Anker 543 USB-C hub**, provisioned by a single script.
 | USB-C wall charger (PD) | Powers the board *through* the hub's PD-IN port. |
 | HDMI monitor + cable | 4K@30Hz max through the hub — fine for a dashboard or static page. |
 | USB keyboard + mouse | Only needed when changing settings; can be unplugged during normal display. |
-| A computer (Windows/Mac/Linux) | For the one-time App Lab setup and for running the script over SSH. Not needed for a new, unflashed board if you use [the install without SSH](#alternative-install-at-the-board-without-ssh). |
+| A computer (Windows/Mac/Linux) | Runs Arduino App Lab for the one-time setup and install. |
 | USB-C data cable | Computer ↔ board, for the App Lab step only. |
 
 This is how everything connects once it's installed:
@@ -70,8 +69,8 @@ flowchart LR
 
 ## Step 1: Prepare the board with Arduino App Lab
 
-This part is manual. It needs Arduino App Lab's interactive setup wizard and a direct
-USB-C connection from your computer to the board. Do it once per board.
+Do this once per board. It needs Arduino App Lab on a computer and a USB-C data cable
+to the board.
 
 1. **Install [Arduino App Lab](https://www.arduino.cc/en/software/#arduino-app-lab)**
    on your computer.
@@ -79,48 +78,44 @@ USB-C connection from your computer to the board. Do it once per board.
 2. **Connect the UNO Q to your computer** with a USB-C data cable.
 3. **Flash the latest stock Arduino Linux image** from App Lab (or with
    `arduino-flasher-cli flash latest` if the board is already detected). Starting from
-   the stock image gives every board a known-clean baseline. Before first setup the
-   login is `arduino` / `arduino`.
+   the stock image gives every board a known-clean baseline. A brand-new board already
+   has it, so this matters most for a board that has been used before. Before first
+   setup the login is `arduino` / `arduino`.
 4. **Run App Lab's first-boot wizard:**
    - Join the board to Wi-Fi (or plug in Ethernet later — either works).
    - **Set a real password** for the `arduino` user. Store it in your password
-     manager, not in this repo.
+     manager, not in this repo. The install script asks for it in Step 2.
    - Optionally give the board a distinct hostname (e.g. `KioskArduino-2`). This helps
      once you have more than one.
-   - App Lab turns on SSH and Network Mode automatically once the board is on the
-     network.
-5. **Confirm SSH works** from your computer before moving on:
-
-   ```bash
-   ssh arduino@<board-ip-or-hostname>
-   ```
 
 ## Step 2: Run the provisioning script
 
 [`provision-kiosk.sh`](provision-kiosk.sh) does everything else in one run: it
 installs packages, writes the kiosk files, and sets up the autostart entries, the
 settings hotkey, autologin, the systemd services, the Wi-Fi helper and the read-only
-root. Then it reboots into a working kiosk.
+root. Then it reboots into a working kiosk. You run it from App Lab's built-in
+terminal, and it downloads itself from this repository — no SSH or file copying.
 
-1. **Copy the script to the board:**
+1. **Open App Lab's terminal:** with the board connected, click the **>_** icon in the
+   bottom-left corner of App Lab. It opens a command prompt on the board itself
+   (over USB, or over the network if App Lab connected that way, in which case it
+   asks for the password from Step 1).
+2. **Paste this one line**, replacing the last part with the page the kiosk should
+   show, and press Enter. The URL must start with `http://` or `https://`, and keep
+   the quotes around it.
 
    ```bash
-   scp provision-kiosk.sh arduino@<board-ip-or-hostname>:~/
+   curl -fsSL https://raw.githubusercontent.com/Scritch-Labs/Arduino-Uno-Q-Kiosk/master/provision-kiosk.sh -o kiosk.sh && bash kiosk.sh "https://the-client-url-goes-here"
    ```
 
-2. **SSH in and run it** with the page the kiosk should show. The URL must start with
-   `http://` or `https://`.
-
-   ```bash
-   ssh arduino@<board-ip-or-hostname>
-   chmod +x provision-kiosk.sh
-   ./provision-kiosk.sh "https://the-client-url-goes-here"
-   ```
-
-3. **Enter the board's password when `sudo` asks.** That's expected.
-4. **Wait for it to reboot.** It will print a series of `==>` steps (package installs
-   take the longest) and finish with `Provisioning complete. Rebooting...`. Your SSH
-   session will drop at that point.
+   Don't know the final page yet? Use any working address (e.g. `https://example.com`)
+   and change it later with **Ctrl+Alt+S**.
+3. **Enter the board's password when `sudo` asks.** Nothing appears on screen while you
+   type; that's normal. If it says `curl: command not found`, run
+   `sudo apt-get install -y curl` first, then the line above again.
+4. **Wait for it to reboot.** It prints a series of `==>` steps (package installs take
+   the longest), then `Provisioning complete. Rebooting...`. The terminal disconnects
+   at that point; the board restarts straight into the kiosk.
 
 > [!IMPORTANT]
 > Run the script **once, on a freshly flashed board.** Its last step turns the root
@@ -128,47 +123,18 @@ root. Then it reboots into a working kiosk.
 > the procedure in [Maintaining an already-provisioned board](#maintaining-an-already-provisioned-board).
 > If you need to start over, reflash the board (Step 1) and run the script again.
 
-## Alternative: install at the board, without SSH
+### Other ways to run it
 
-Use this when whoever is setting up the board isn't comfortable with SSH (for
-example, the client installing it themselves). Everything happens on the board's own
-screen, with a keyboard and mouse plugged into the hub. It replaces Steps 1 and 2;
-Steps 3 and 4 are the same.
+The same one-line command works from any shell on the board:
 
-> [!NOTE]
-> This path hasn't been tested end to end on a board yet. Try it once yourself before
-> sending the instructions to a client.
-
-1. **Connect everything through the hub**, as in the diagram under
-   [What you need](#what-you-need): monitor, keyboard, mouse, Ethernet if you're using
-   it, then the wall charger into PD-IN. The board boots to its desktop.
-2. **Complete the Arduino App Lab welcome screen** that opens on the board. This is
-   the same first-boot setup as Step 1, run on the board instead of from a computer:
-   - Join Wi-Fi (skip this if Ethernet is plugged in).
-   - **Set a password** for the `arduino` user and write it down somewhere safe. The
-     installer asks for it in step 4.
-
-   A brand-new board already has the stock image, so it doesn't need flashing. Only a
-   board that has been used before needs reflashing first, and that still needs a
-   computer (Step 1).
-3. **Open a terminal:** the Applications menu (top-left) → **System** →
-   **Terminal Emulator**.
-4. **Type or paste this one line**, replacing the last part with the page the kiosk
-   should show, and press Enter:
-
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/Scritch-Labs/Arduino-Uno-Q-Kiosk/master/provision-kiosk.sh -o kiosk.sh && bash kiosk.sh "https://the-client-url-goes-here"
-   ```
-
-   - When it asks for a password, type the one from step 2. Nothing appears on screen
-     while you type; that's normal.
-   - If it says `curl: command not found`, run `sudo apt-get install -y curl` first,
-     then the line above again.
-5. **Wait.** It prints a series of `==>` steps (package installs take the longest),
-   then `Provisioning complete. Rebooting...`. The board restarts straight into the
-   kiosk.
-
-The same one-run rule applies as in Step 2: only run it on a freshly set-up board.
+- **Over SSH**, from your own computer: `ssh arduino@<board-ip-or-hostname>`, then
+  paste the command. App Lab turns SSH on during the first-boot wizard.
+- **On the board's own desktop**, with a monitor, keyboard and mouse on the hub: open
+  the Applications menu → **System** → **Terminal Emulator** and paste the command.
+  Handy if no computer is to hand.
+- **Without internet access to GitHub**, copy the script over instead:
+  `scp provision-kiosk.sh arduino@<board-ip-or-hostname>:~/`, then
+  `bash provision-kiosk.sh "https://the-client-url-goes-here"` on the board.
 
 ## Step 3: Verify the kiosk
 
