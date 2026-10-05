@@ -152,6 +152,39 @@ actual reason for choosing this board originally.
    monitors) often have their own "Auto Power Off" after ~4 hours without a
    remote press; that must be turned off in the TV's own menu.
 
+9. **First fresh-board install (2026-10-04/05) surfaced four bugs,** all invisible on
+   the original development board because of state it had picked up along the way:
+   - **Ctrl+Alt+S did nothing.** XFCE ignores `commands/custom` shortcuts unless
+     `commands/custom/override` is `true`. The script wrote a shortcuts file with only
+     our binding; the dev board worked because its file already had `override=true`.
+     Fixed in the written XML, and the script also sets both properties through the
+     live `xfconfd` when run inside a desktop session (the App Lab / board-terminal
+     install path), since `xfconfd` caches the channel.
+   - **Chromium stuck on "profile appears to be in use by another Chromium process on
+     another computer".** The stale `SingletonLock` (left by a power cut, on
+     persistent `/home`) named a different hostname than the board's current one —
+     most likely a rename made after overlayroot was on, which only lasts until the
+     next reboot. The dialog runs as a separate `xmessage` process and blocks the
+     restart loop. Fix: `kiosk-chromium.sh` deletes `Singleton{Lock,Socket,Cookie}`
+     before every launch (safe: only one Chromium ever runs, and the last one has
+     exited).
+   - **Wi-Fi change lost after a power cut: 0-byte profile.** The persisted
+     `.nmconnection` was empty; NetworkManager logged `connection.type: property is
+     missing` and fell back to the setup network. The helper used a plain `cp` onto
+     ext4 with no fsync, so a power cut within ~30 s kept the file's name but not its
+     data. Fix: temp file + `sync` + rename; restore skips empty files. `server.py`'s
+     `atomic_write` had the same gap (rename without fsync) and now fsyncs the file and
+     directory.
+   - **Wi-Fi change lost after any reboot: priority tie.** All Wi-Fi profiles had
+     `autoconnect-priority` 0, so NetworkManager picked the most recently used — but
+     its timestamps (`/var/lib/NetworkManager/timestamps`) live on the tmpfs overlay
+     and reset every boot to provisioning-time state, making the setup network look
+     newest. Fix: after a successful connect the helper sets the chosen profile's
+     priority to (highest Wi-Fi priority + 1) before persisting it.
+   All four were patched on the test board in place and verified across a reboot;
+   the README's "Boards provisioned before 2026-10-05" table lists what an older board
+   needs.
+
 ## Known limitations / deliberately deferred
 
 - **Login-required target pages:** Chromium runs `--incognito` (avoids "restore
@@ -168,11 +201,9 @@ actual reason for choosing this board originally.
   on sustained TCP/SSH. Root-caused to the network path itself, not the board or any
   of our changes. Not urgent, but relevant if remote SSH management of these boards
   is part of the ongoing plan.
-- **`provision-kiosk.sh` has only been run on the one board this whole project was
-  developed against.** Worth a dry run against a genuinely fresh second board before
-  trusting it for an unattended fleet rollout — the *steps* are all individually
-  verified, but the full script hasn't been exercised start-to-finish on new
-  hardware.
+- **Power-cut test of the Wi-Fi fix still pending.** The fixes in item 9 were
+  verified across a clean reboot; a Wi-Fi change followed within seconds by a real
+  power cut hasn't been re-tested yet.
 
 ## Repo contents
 
@@ -192,7 +223,11 @@ actual reason for choosing this board originally.
 - `5ab18fa` — App Lab autostart fix.
 - `6204717` — Wi-Fi changes persist across reboots; passworded-connect fix.
 - `b968f37` — README rewritten as installation guide + architecture reference.
-- Light-locker disabled and stay-awake audit documented (2026-10-04).
+- `a9b55bf` — light-locker disabled; stay-awake audit documented.
+- `6518d24` — install-without-SSH path; repo made public on GitHub.
+- `0b94788` — Ctrl+Alt+S `override` fix.
+- `dfe0811` — App Lab terminal + GitHub download made the default install path.
+- Chromium profile-lock, fsync-on-save and Wi-Fi priority fixes (2026-10-05).
 
 Public on GitHub: <https://github.com/Scritch-Labs/Arduino-Uno-Q-Kiosk> (branch `master`).
 The install-without-SSH one-liner in the README downloads the script straight from

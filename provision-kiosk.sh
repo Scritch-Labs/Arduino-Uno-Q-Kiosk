@@ -66,7 +66,17 @@ def atomic_write(path, content):
     fd, tmp_path = tempfile.mkstemp(dir=d)
     with os.fdopen(fd, "w") as f:
         f.write(content)
+        # Force the data to disk before the rename. Without this, a power cut in
+        # the few seconds after Save can leave an empty file behind (ext4 commits
+        # the rename before the delayed data write).
+        f.flush()
+        os.fsync(f.fileno())
     os.rename(tmp_path, path)
+    dfd = os.open(d, os.O_RDONLY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
 
 def write_url(url):
     atomic_write(CONFIG_PATH, json.dumps({"url": url}))
@@ -403,6 +413,12 @@ get_target() {
 
 while true; do
   target=$(get_target)
+  # Clear Chromium's profile lock before every launch. A hard power cut leaves
+  # it behind, and if the hostname recorded in it differs from the current one
+  # Chromium blocks on a modal "profile in use on another computer" dialog that
+  # this loop can never get past. Only one Chromium ever runs here, and the
+  # previous one has exited by this point, so removing it is safe.
+  rm -f /home/arduino/.config/chromium/Singleton{Lock,Socket,Cookie}
   chromium \
     --kiosk \
     --no-first-run \
@@ -599,13 +615,35 @@ fi
 # the front end just "saved". Copy it onto the real, persistent /home/arduino
 # disk so kiosk-wifi-restore.sh can put it back before NetworkManager starts.
 if [ "$rc" -eq 0 ]; then
+    # Make the network just chosen outrank every other saved one. With equal
+    # priorities NetworkManager prefers the most recently used network, but its
+    # "last used" timestamps live on the tmpfs root overlay and reset on every
+    # reboot to whatever was used at provisioning time -- so without this, the
+    # board falls back to the setup network whenever that's still in range.
+    conn_uuid=$(nmcli -t -f TYPE,UUID connection show --active \
+        | awk -F: '$1=="802-11-wireless"{print $2; exit}')
+    if [ -n "$conn_uuid" ]; then
+        max_prio=$(nmcli -t -f TYPE,AUTOCONNECT-PRIORITY connection show \
+            | awk -F: '$1=="802-11-wireless"{print $2}' | sort -n | tail -1)
+        nmcli connection modify "$conn_uuid" \
+            connection.autoconnect-priority $(( ${max_prio:-0} + 1 )) || true
+    fi
     conn_file=$(nmcli -t -f TYPE,FILENAME connection show --active \
         | awk -F: '$1=="802-11-wireless"{print substr($0, length($1)+2); exit}')
-    if [ -n "$conn_file" ] && [ -f "$conn_file" ]; then
+    if [ -n "$conn_file" ] && [ -s "$conn_file" ]; then
         mkdir -p "$PERSIST_DIR"
         chmod 700 "$PERSIST_DIR"
-        cp -p "$conn_file" "$PERSIST_DIR/$(basename "$conn_file")"
-        chmod 600 "$PERSIST_DIR/$(basename "$conn_file")"
+        # Copy to a temp file, force it to disk, then rename into place. A plain
+        # cp left a 0-byte profile behind when power was cut shortly after a
+        # Wi-Fi change (ext4 had committed the file's name but not its data),
+        # and NetworkManager ignores an empty profile on the next boot.
+        dest="$PERSIST_DIR/$(basename "$conn_file")"
+        tmp="$PERSIST_DIR/.tmp-$$.nmconnection"
+        cp -p "$conn_file" "$tmp"
+        chmod 600 "$tmp"
+        sync "$tmp"
+        mv -f "$tmp" "$dest"
+        sync "$PERSIST_DIR"
     fi
 fi
 exit "$rc"
@@ -630,6 +668,9 @@ mkdir -p "$DST"
 
 shopt -s nullglob
 for f in "$SRC"/*.nmconnection; do
+    # Skip empty profiles (left by a power cut on boards provisioned before the
+    # sync fix) -- NetworkManager would just log an error and ignore them.
+    [ -s "$f" ] || continue
     cp -p "$f" "$DST/"
     chown root:root "$DST/$(basename "$f")"
     chmod 600 "$DST/$(basename "$f")"

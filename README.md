@@ -306,6 +306,10 @@ sequenceDiagram
 - **`settings`**: it launches Chromium on `http://localhost:8080/settings`.
 
 When Chromium exits for any reason, the loop waits a second and launches it again.
+Before each launch it deletes Chromium's profile lock (`~/.config/chromium/Singleton*`).
+A power cut leaves that lock behind, and if it names a different hostname Chromium
+stops on a "profile appears to be in use by another Chromium process on another
+computer" dialog that would otherwise freeze the kiosk.
 Before launching, it also turns off screen blanking and DPMS, so the monitor never goes
 to sleep. Nothing else can turn them back on: XFCE's power manager isn't installed,
 the stock screen locker is disabled (see below), and systemd is left at its default of
@@ -418,6 +422,18 @@ flowchart LR
   is wiped on every reboot (see below). So after a successful connect the helper copies
   the profile to `/home/arduino/kiosk/wifi-connections/`, and
   `kiosk-wifi-restore.service` copies it back before NetworkManager starts.
+- **The saved copy is forced to disk before it counts.** The helper copies to a temp
+  file, runs `sync` on it, then renames it into place. A plain copy left an empty
+  profile behind when the power was cut within ~30 seconds of a Wi-Fi change (the
+  filesystem had recorded the file but not yet written its contents), and
+  NetworkManager ignores an empty profile. The restore step also skips empty files.
+- **The network chosen last always wins.** After a successful connect, the helper
+  gives that profile an `autoconnect-priority` one higher than any other saved Wi-Fi
+  profile. Without this, every profile has priority 0 and NetworkManager prefers the
+  most recently used one — but its "last used" times live under `/var/lib`, on the
+  temporary root, so after each reboot they say the network from the original setup
+  was used last. Whenever that network was still in range, the board went back to it.
+  Older profiles stay saved as fallbacks.
 
 ## Power-cut resilience
 
@@ -443,7 +459,9 @@ flowchart TB
   cut can't corrupt the system because the system isn't being written to.
 - **`/home/arduino` is a separate real partition** on the stock image. It holds the
   only data that must survive a reboot: the URL, the mode flag, and saved Wi-Fi
-  profiles. It's only written when the client saves something, and always atomically.
+  profiles. It's only written when the client saves something, and always atomically:
+  write a temp file, force it to disk (`fsync`/`sync`), then rename it into place. A
+  power cut mid-save leaves either the old file or the new one, never an empty one.
 - **The important setting is `overlayroot="tmpfs:recurse=0"`** in
   `/etc/overlayroot.conf`. The default, `recurse=1`, would also put `/home/arduino`
   behind the RAM layer. Everything would look fine until the first reboot, when the
@@ -540,6 +558,22 @@ the lightdm config. When editing anything in `sudoers.d`, check it with
 `sudo visudo -c -f <file>` before putting it in place. A broken sudoers file can break
 `sudo` for the whole system.
 
+### Boards provisioned before 2026-10-05
+
+Boards set up with an older copy of the script are missing these fixes. Either reflash
+and reinstall, or patch them in place:
+
+| Problem | Fix | Where it lives |
+|---|---|---|
+| Ctrl+Alt+S does nothing | Add `<property name="override" type="bool" value="true"/>` inside `commands/custom` | `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml` (persistent) |
+| Chromium stuck on "profile appears to be in use … on another computer" | Delete `~/.config/chromium/Singleton{Lock,Socket,Cookie}` before each launch | `~/kiosk/kiosk-chromium.sh` (persistent) |
+| URL lost after a power cut right after Save | `fsync` before the rename in `atomic_write` | `~/kiosk/server.py` (persistent; restart `kiosk-server`) |
+| Wi-Fi change lost after reboot | `sync` + rename when saving the profile, priority bump, skip empty files on restore | `/usr/local/sbin/kiosk-wifi-{connect,restore}.sh` (root disk — use the procedure above) |
+
+Take the current versions of these files from `provision-kiosk.sh`. After patching
+the Wi-Fi helpers, delete any 0-byte files in `~/kiosk/wifi-connections/` (as root)
+and redo the Wi-Fi change once so the chosen network gets its priority.
+
 ## Known limitations
 
 - **Pages that need a login.** Chromium runs `--incognito`, so logins don't persist.
@@ -554,9 +588,11 @@ the lightdm config. When editing anything in `sudoers.d`, check it with
 - **The Wi-Fi password is briefly visible to other processes.** While `nmcli` runs, the
   password is on its command line, so something like `ps` on the board could see it for
   a moment. This is accepted because the boards have no other user accounts.
-- **The provisioning script has only been run from start to finish on one board.**
-  Every step was tested on real hardware, but do the first new board as a supervised
-  dry run, working through the [verification checklist](#step-3-verify-the-kiosk).
+- **New boards still deserve a supervised first run.** The script has now been run
+  from start to finish on a freshly flashed second board, which surfaced and fixed
+  several bugs (see [Boards provisioned before 2026-10-05](#boards-provisioned-before-2026-10-05)).
+  Work through the [verification checklist](#step-3-verify-the-kiosk) on each new
+  board, including a Wi-Fi change followed by a power cut.
 
 ## File layout
 
