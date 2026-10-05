@@ -194,8 +194,10 @@ actual reason for choosing this board originally.
 - `b968f37` — README rewritten as installation guide + architecture reference.
 - Light-locker disabled and stay-awake audit documented (2026-10-04).
 
-Pushed to `ssh://git@git.derek-crew.com:2222/Scritch-Labs/Arduino-Uno-Q-Terminal-Monitor.git`
-(branch `master`).
+Public on GitHub: <https://github.com/Scritch-Labs/Arduino-Uno-Q-Kiosk> (branch `master`).
+The install-without-SSH one-liner in the README downloads the script straight from
+there, so `provision-kiosk.sh` must never contain secrets. Originally hosted on a
+LAN-only Gitea server.
 
 ## If you're picking this back up
 

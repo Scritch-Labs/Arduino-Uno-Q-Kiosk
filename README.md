@@ -19,6 +19,7 @@ and an **Anker 543 USB-C hub**, provisioned by a single script.
   - [What you need](#what-you-need)
   - [Step 1: Prepare the board with Arduino App Lab](#step-1-prepare-the-board-with-arduino-app-lab)
   - [Step 2: Run the provisioning script](#step-2-run-the-provisioning-script)
+  - [Alternative: install at the board, without SSH](#alternative-install-at-the-board-without-ssh)
   - [Step 3: Verify the kiosk](#step-3-verify-the-kiosk)
   - [Step 4: Install on site](#step-4-install-on-site)
   - [Using the kiosk (client guide)](#using-the-kiosk-client-guide)
@@ -47,7 +48,7 @@ and an **Anker 543 USB-C hub**, provisioned by a single script.
 | USB-C wall charger (PD) | Powers the board *through* the hub's PD-IN port. |
 | HDMI monitor + cable | 4K@30Hz max through the hub — fine for a dashboard or static page. |
 | USB keyboard + mouse | Only needed when changing settings; can be unplugged during normal display. |
-| A computer (Windows/Mac/Linux) | For the one-time App Lab setup and for running the script over SSH. |
+| A computer (Windows/Mac/Linux) | For the one-time App Lab setup and for running the script over SSH. Not needed for a new, unflashed board if you use [the install without SSH](#alternative-install-at-the-board-without-ssh). |
 | USB-C data cable | Computer ↔ board, for the App Lab step only. |
 
 This is how everything connects once it's installed:
@@ -126,6 +127,48 @@ root. Then it reboots into a working kiosk.
 > filesystem read-only. After that, changes to anything outside `/home/arduino` need
 > the procedure in [Maintaining an already-provisioned board](#maintaining-an-already-provisioned-board).
 > If you need to start over, reflash the board (Step 1) and run the script again.
+
+## Alternative: install at the board, without SSH
+
+Use this when whoever is setting up the board isn't comfortable with SSH (for
+example, the client installing it themselves). Everything happens on the board's own
+screen, with a keyboard and mouse plugged into the hub. It replaces Steps 1 and 2;
+Steps 3 and 4 are the same.
+
+> [!NOTE]
+> This path hasn't been tested end to end on a board yet. Try it once yourself before
+> sending the instructions to a client.
+
+1. **Connect everything through the hub**, as in the diagram under
+   [What you need](#what-you-need): monitor, keyboard, mouse, Ethernet if you're using
+   it, then the wall charger into PD-IN. The board boots to its desktop.
+2. **Complete the Arduino App Lab welcome screen** that opens on the board. This is
+   the same first-boot setup as Step 1, run on the board instead of from a computer:
+   - Join Wi-Fi (skip this if Ethernet is plugged in).
+   - **Set a password** for the `arduino` user and write it down somewhere safe. The
+     installer asks for it in step 4.
+
+   A brand-new board already has the stock image, so it doesn't need flashing. Only a
+   board that has been used before needs reflashing first, and that still needs a
+   computer (Step 1).
+3. **Open a terminal:** the Applications menu (top-left) → **System** →
+   **Terminal Emulator**.
+4. **Type or paste this one line**, replacing the last part with the page the kiosk
+   should show, and press Enter:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Scritch-Labs/Arduino-Uno-Q-Kiosk/master/provision-kiosk.sh -o kiosk.sh && bash kiosk.sh "https://the-client-url-goes-here"
+   ```
+
+   - When it asks for a password, type the one from step 2. Nothing appears on screen
+     while you type; that's normal.
+   - If it says `curl: command not found`, run `sudo apt-get install -y curl` first,
+     then the line above again.
+5. **Wait.** It prints a series of `==>` steps (package installs take the longest),
+   then `Provisioning complete. Rebooting...`. The board restarts straight into the
+   kiosk.
+
+The same one-run rule applies as in Step 2: only run it on a freshly set-up board.
 
 ## Step 3: Verify the kiosk
 
