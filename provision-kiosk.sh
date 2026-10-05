@@ -480,10 +480,23 @@ else
   <property name="commands" type="empty">
     <property name="custom" type="empty">
       <property name="&lt;Primary&gt;&lt;Alt&gt;s" type="string" value="/home/arduino/kiosk/toggle-settings.sh"/>
+      <property name="override" type="bool" value="true"/>
     </property>
   </property>
 </channel>
 XFCONFEOF
+fi
+# If an XFCE session is already running (e.g. the script was started from the
+# board's own desktop terminal), xfconfd has this channel cached in memory and
+# won't pick up the file edit -- and may write its stale copy back over it.
+# Set the same properties through the live daemon so both agree.
+BUS="/run/user/$(id -u)/bus"
+if [ -S "$BUS" ] && pgrep -u "$(id -u)" -x xfconfd > /dev/null; then
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=$BUS"
+  xfconf-query -c xfce4-keyboard-shortcuts -p "/commands/custom/<Primary><Alt>s" \
+    -n -t string -s /home/arduino/kiosk/toggle-settings.sh || true
+  xfconf-query -c xfce4-keyboard-shortcuts -p /commands/custom/override \
+    -n -t bool -s true || true
 fi
 
 echo "==> lightdm autologin (arduino -> xfce session)"
